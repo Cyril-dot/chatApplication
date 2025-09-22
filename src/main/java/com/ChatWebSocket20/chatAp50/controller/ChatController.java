@@ -64,7 +64,8 @@ public class ChatController {
     }
 
     // REST endpoint for fetching recent messages (used by client fetchHistory)
-    @GetMapping("/messages")
+    // REST endpoint for fetching recent messages (used by client fetchHistory)
+    @GetMapping("/messages/recent")
     public ResponseEntity<List<ChatMessageOut>> getMessages(@RequestParam(value = "limit", defaultValue = "50") int limit) {
         if (limit <= 0) limit = 50;
         List<MessageEntity> rows = messageRepo.findLatestMessages(PageRequest.of(0, limit));
