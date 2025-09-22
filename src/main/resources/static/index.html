@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Global Chat — SockJS + STOMP</title>
+</head>
+<body>
+<div class="app">
+    <aside class="sidebar">
+        <h1>Global Chat</h1>
+
+        <!-- Only username now -->
+        <label>Username</label>
+        <input id="username" placeholder="Your username" />
+        <div class="controls">
+            <button id="connectBtn" class="btn">Connect</button>
+            <button id="disconnectBtn" class="btn" style="background:#d97706">Disconnect</button>
+        </div>
+
+        <div class="rooms">
+            <p class="muted small">Quick actions</p>
+            <button id="fetchHistory">Fetch latest 50 messages</button>
+            <button id="clearMessages">Clear UI</button>
+        </div>
+
+        <hr style="opacity:.06;margin:12px 0" />
+        <p class="muted small">Connection status: <span id="status">DISCONNECTED</span></p>
+        <p class="muted small">STOMP endpoint: <code id="wsEndpoint">/chat</code></p>
+        <p class="muted small">Subscribe topic: <code id="topicPattern">/topic/global</code></p>
+    </aside>
+
+    <main class="main">
+        <div style="padding:14px;border-bottom:1px solid rgba(255,255,255,0.03);display:flex;align-items:center;justify-content:space-between">
+            <div>
+                <strong id="roomLabel">Global Chat</strong>
+                <div class="meta" id="roomName">Everyone</div>
+            </div>
+            <div class="meta">Messages: <span id="msgCount">0</span></div>
+        </div>
+
+        <div id="messages" class="messages"></div>
+
+        <!-- Single proper input for typing messages -->
+        <div class="composer">
+            <input id="content" placeholder="Type a message and press Enter or Send" />
+            <button id="sendBtn" class="btn">Send</button>
+        </div>
+    </main>
+</div>
+
+<!-- SockJS client -->
+<script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+
+<!-- STOMP client for browsers -->
+<script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+
+<!-- Your custom JS -->
+<script src="index.js"></script>
+</body>
+</html>
