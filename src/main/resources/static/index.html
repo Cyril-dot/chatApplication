@@ -4,6 +4,219 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Global Chat — SockJS + STOMP</title>
+
+    <!-- Styling: professional dark UI with white and blue accents -->
+    <style>
+        :root{
+          --bg: #071026;          /* deep navy / black */
+          --panel: #0b1522;       /* panel background */
+          --muted: #9aa7b6;       /* muted text */
+          --text: #eef6ff;        /* main text (near-white) */
+          --accent: #0ea5e9;      /* bright blue accent */
+          --accent-strong: #0369a1;
+          --glass: rgba(255,255,255,0.03);
+          --radius: 12px;
+          --gap: 14px;
+          --shadow: 0 6px 18px rgba(2,6,23,0.6);
+          font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+                       Roboto, "Helvetica Neue", Arial;
+        }
+
+        /* Reset & layout */
+        *{box-sizing:border-box}
+        html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),#031021);color:var(--text);-webkit-font-smoothing:antialiased}
+        .app{
+          max-width:1150px;
+          margin:28px auto;
+          display:grid;
+          grid-template-columns:320px 1fr;
+          gap:20px;
+          padding:24px;
+        }
+
+        /* Sidebar */
+        .sidebar{
+          background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+          border:1px solid rgba(255,255,255,0.04);
+          padding:20px;
+          border-radius:var(--radius);
+          box-shadow:var(--shadow);
+          display:flex;
+          flex-direction:column;
+          gap:12px;
+          min-height:520px;
+        }
+
+        .sidebar h1{
+          margin:0;
+          font-size:20px;
+          letter-spacing:0.2px;
+          color:var(--text);
+        }
+
+        label{display:block;font-size:13px;color:var(--muted);margin-top:6px}
+        input[type="text"], input[type="password"], input[id="username"], input#content{
+          width:100%;
+          padding:10px 12px;
+          border-radius:10px;
+          border:1px solid rgba(255,255,255,0.04);
+          background:transparent;
+          color:var(--text);
+          outline: none;
+          margin-top:6px;
+          font-size:14px;
+          transition:box-shadow .15s, border-color .15s;
+        }
+        input::placeholder{color:rgba(238,246,255,0.35)}
+
+        .controls{display:flex;gap:10px;margin-top:10px}
+        .btn{
+          display:inline-flex;
+          align-items:center;
+          justify-content:center;
+          gap:8px;
+          padding:9px 12px;
+          border-radius:10px;
+          background:linear-gradient(180deg,var(--accent),var(--accent-strong));
+          color: #06202b;
+          font-weight:600;
+          border: none;
+          cursor:pointer;
+          box-shadow: 0 6px 18px rgba(14,165,233,0.12);
+          transition:transform .08s ease, box-shadow .12s;
+          font-size:14px;
+        }
+        .btn:active{transform:translateY(1px)}
+        .btn.secondary{
+          background: transparent;
+          color:var(--text);
+          border:1px solid rgba(255,255,255,0.04);
+          box-shadow:none;
+        }
+
+        /* special disconnect button color */
+        #disconnectBtn{
+          background: linear-gradient(180deg,#ffba72,#ff7a18);
+          color:#1b0f00;
+          box-shadow: 0 6px 18px rgba(255,122,24,0.12);
+        }
+
+        .rooms{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+        .rooms button{padding:10px;border-radius:10px;background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--text);cursor:pointer}
+        hr{border:0;height:1px;background:var(--glass);margin:10px 0;border-radius:8px}
+
+        .muted{color:var(--muted)}
+        .small{font-size:12px}
+
+        code{background:rgba(255,255,255,0.02);padding:4px 8px;border-radius:6px;font-size:12px;color:var(--text)}
+
+        /* Main area */
+        .main{
+          background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+          border-radius:var(--radius);
+          overflow:hidden;
+          border:1px solid rgba(255,255,255,0.04);
+          display:flex;
+          flex-direction:column;
+          min-height:520px;
+          box-shadow:var(--shadow);
+        }
+
+        .main > div:first-child{
+          padding:14px 18px;
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:12px;
+          border-bottom:1px solid rgba(255,255,255,0.03);
+          background:linear-gradient(180deg, rgba(255,255,255,0.012), transparent);
+        }
+
+        .meta{color:var(--muted);font-size:13px}
+        #roomLabel{font-size:16px}
+
+        /* Messages list */
+        .messages{
+          padding:18px;
+          display:flex;
+          flex-direction:column;
+          gap:12px;
+          overflow:auto;
+          height:calc(100% - 150px); /* leave room for composer */
+        }
+
+        .msg{
+          max-width:78%;
+          background:linear-gradient(180deg, rgba(255,255,255,0.015), rgba(255,255,255,0.01));
+          padding:12px 14px;
+          border-radius:10px;
+          border:1px solid rgba(255,255,255,0.02);
+          box-shadow: 0 6px 18px rgba(2,6,23,0.4);
+          display:inline-block;
+          word-wrap:break-word;
+        }
+
+        .msg .metaRow{
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:10px;
+          margin-bottom:8px;
+        }
+        .msg .username{font-weight:700;color:var(--text);font-size:13px}
+        .msg .time{font-size:12px;color:var(--muted)}
+
+        /* Differentiate own messages */
+        .msg.own{
+          margin-left:auto;
+          background:linear-gradient(180deg, rgba(14,165,233,0.12), rgba(3,105,161,0.12));
+          border:1px solid rgba(14,165,233,0.14);
+          color:var(--text);
+        }
+
+        /* Composer */
+        .composer{
+          border-top:1px solid rgba(255,255,255,0.03);
+          padding:12px 18px;
+          display:flex;
+          gap:10px;
+          align-items:center;
+          background:linear-gradient(180deg, transparent, rgba(255,255,255,0.01));
+        }
+        .composer input#content{
+          flex:1;
+          padding:12px;
+          font-size:15px;
+          border-radius:10px;
+          background:transparent;
+          border:1px solid rgba(255,255,255,0.04);
+        }
+        .composer button#sendBtn{min-width:110px}
+
+        /* Message counter badge */
+        #msgCount{
+          background:rgba(255,255,255,0.03);
+          padding:6px 10px;
+          border-radius:999px;
+          font-weight:700;
+          color:var(--text);
+          font-size:13px;
+          border:1px solid rgba(255,255,255,0.02);
+        }
+
+        /* Responsive */
+        @media (max-width:900px){
+          .app{grid-template-columns:1fr; padding:12px}
+          .sidebar{order:2}
+          .main{order:1}
+          .messages{height:420px}
+          .app{max-width:900px}
+        }
+
+        /* Tiny hover/focus details */
+        button:hover{filter:brightness(1.03)}
+        input:focus, textarea:focus{box-shadow:0 6px 18px rgba(14,165,233,0.08);border-color:rgba(14,165,233,0.25)}
+    </style>
 </head>
 <body>
 <div class="app">
@@ -11,11 +224,12 @@
         <h1>Global Chat</h1>
 
         <!-- Only username now -->
-        <label>Username</label>
-        <input id="username" placeholder="Your username" />
+        <label for="username">Username</label>
+        <input id="username" placeholder="Your username" autocomplete="off" />
+
         <div class="controls">
             <button id="connectBtn" class="btn">Connect</button>
-            <button id="disconnectBtn" class="btn" style="background:#d97706">Disconnect</button>
+            <button id="disconnectBtn" class="btn">Disconnect</button>
         </div>
 
         <div class="rooms">
@@ -31,7 +245,7 @@
     </aside>
 
     <main class="main">
-        <div style="padding:14px;border-bottom:1px solid rgba(255,255,255,0.03);display:flex;align-items:center;justify-content:space-between">
+        <div style="display:flex;align-items:center;justify-content:space-between">
             <div>
                 <strong id="roomLabel">Global Chat</strong>
                 <div class="meta" id="roomName">Everyone</div>
@@ -39,11 +253,11 @@
             <div class="meta">Messages: <span id="msgCount">0</span></div>
         </div>
 
-        <div id="messages" class="messages"></div>
+        <div id="messages" class="messages" aria-live="polite"></div>
 
         <!-- Single proper input for typing messages -->
         <div class="composer">
-            <input id="content" placeholder="Type a message and press Enter or Send" />
+            <input id="content" placeholder="Type a message and press Enter or Send" autocomplete="off" />
             <button id="sendBtn" class="btn">Send</button>
         </div>
     </main>
