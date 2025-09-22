@@ -1,118 +1,360 @@
-const WS_ENDPOINT = '/chat';
-const APP_DESTINATION = '/app/chat.send';
+// index.js — SockJS + STOMP client for your HTML
+(() => {
+  const wsEndpointEl = document.getElementById('wsEndpoint'); // "/chat"
+  const topicPatternEl = document.getElementById('topicPattern'); // "/topic/global"
+  const statusEl = document.getElementById('status');
+  const messagesEl = document.getElementById('messages');
+  const msgCountEl = document.getElementById('msgCount');
 
-let stompClient = null;
-let receivedMessageIds = new Set(); // track displayed messages to prevent duplicates
+  const connectBtn = document.getElementById('connectBtn');
+  const disconnectBtn = document.getElementById('disconnectBtn');
+  const sendBtn = document.getElementById('sendBtn');
+  const fetchHistoryBtn = document.getElementById('fetchHistory');
+  const clearMessagesBtn = document.getElementById('clearMessages');
 
-const usernameInput = document.getElementById('username');
-const connectBtn = document.getElementById('connectBtn');
-const disconnectBtn = document.getElementById('disconnectBtn');
-const sendBtn = document.getElementById('sendBtn');
-const messagesEl = document.getElementById('messages');
-const statusEl = document.getElementById('status');
-const msgCount = document.getElementById('msgCount');
+  const usernameInput = document.getElementById('username');
+  const contentInput = document.getElementById('content');
 
-function setStatus(text) { statusEl.textContent = text; }
+  let stompClient = null;
+  let subscription = null;
+  let messageCount = 0;
 
-// Add a message to the UI and enable copy
-function addMessageToUI(msg) {
-    const msgId = msg.id || msg.createdAt; // unique id
-    if (receivedMessageIds.has(msgId)) return; // skip duplicates
-    receivedMessageIds.add(msgId);
+  function setStatus(s) {
+    statusEl.textContent = s;
+    statusEl.style.color = s === 'CONNECTED' ? '#6ee7b7' : '#ffb86b';
+  }
 
-    const div = document.createElement('div');
-    div.className = 'message';
+  function renderMessage(msg) {
+    // msg expected: {id, content, createdAt, senderId/displayName/username}
+    const wrapper = document.createElement('div');
+    wrapper.className = 'msg';
+    // mark own messages if username matches
+    const currentUser = usernameInput.value && usernameInput.value.trim();
+    if (msg.username && currentUser && msg.username === currentUser) {
+      wrapper.classList.add('own');
+    }
 
     const meta = document.createElement('div');
-    meta.className = 'meta small';
-    meta.textContent = `${msg.senderName || 'unknown'} • ${new Date(msg.createdAt || Date.now()).toLocaleString()}`;
-    div.appendChild(meta);
+    meta.className = 'metaRow';
+    const userSpan = document.createElement('div');
+    userSpan.className = 'username';
+    userSpan.textContent = msg.displayName || msg.username || 'Anonymous';
+    const timeSpan = document.createElement('div');
+    timeSpan.className = 'time';
+    timeSpan.textContent = new Date(msg.createdAt || Date.now()).toLocaleString();
 
-    const body = document.createElement('div');
-    body.textContent = msg.content || '';
-    body.style.cursor = 'pointer';
-    body.title = "Click to copy";
-    body.addEventListener('click', () => {
-        navigator.clipboard.writeText(msg.content || '').then(() => {
-            alert('Message copied to clipboard!');
-        });
-    });
-    div.appendChild(body);
+    meta.appendChild(userSpan);
+    meta.appendChild(timeSpan);
 
-    messagesEl.appendChild(div);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-    msgCount.textContent = messagesEl.children.length;
-}
+    const content = document.createElement('div');
+    content.textContent = msg.content || '';
 
-function clearMessages() {
+    wrapper.appendChild(meta);
+    wrapper.appendChild(content);
+
+    messagesEl.prepend(wrapper); // newest on top (your SQL uses ORDER BY created_at DESC)
+    messageCount++;
+    msgCountEl.textContent = messageCount;
+  }
+
+  function clearUI() {
     messagesEl.innerHTML = '';
-    msgCount.textContent = '0';
-    receivedMessageIds.clear();
-}
+    messageCount = 0;
+    msgCountEl.textContent = 0;
+  }
 
-async function fetchHistory() {
-    try {
-        const res = await fetch('/api/chat/messages');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        if (!Array.isArray(data)) {
-            console.error("Expected array, got:", data);
-            return;
-        }
-        clearMessages();
-        data.forEach(addMessageToUI);
-    } catch (e) {
-        console.error("Failed to fetch chat history:", e);
+  function connect() {
+    if (stompClient && stompClient.connected) {
+      return;
     }
-}
 
-function connect() {
-    const username = usernameInput.value.trim() || 'anonymous';
-    if (!username) return alert('Enter a username');
+    const endpoint = wsEndpointEl.textContent || '/chat';
+    // build absolute URL — SockJS will use same host/port as page by default
+    // If your websocket URL is different, set wsEndpointEl.innerText to the correct path.
+    const sock = new SockJS(endpoint);
+    stompClient = Stomp.over(sock);
 
-    setStatus('CONNECTING...');
-    const socket = new SockJS(WS_ENDPOINT);
-    stompClient = Stomp.over(socket);
-    stompClient.debug = () => {};
+    // Optional: disable debug noise in console
+    stompClient.debug = function () {};
 
-    stompClient.connect({}, frame => {
-        setStatus('CONNECTED');
-
-        // Subscribe to global chat topic
-        stompClient.subscribe('/topic/global', msg => {
-            if (!msg.body) return;
-            const message = JSON.parse(msg.body);
-            addMessageToUI(message);
-        });
-
-        // Fetch last 50 messages once after connecting
-        fetchHistory();
+    stompClient.connect({}, function (frame) {
+      setStatus('CONNECTED');
+      // subscribe to topic
+      const topic = topicPatternEl.textContent || '/topic/global';
+      subscription = stompClient.subscribe(topic, function (message) {
+        try {
+          const body = JSON.parse(message.body);
+          renderMessage(body);
+        } catch (e) {
+          // if backend sends plain text:
+          renderMessage({ content: message.body, createdAt: Date.now() });
+        }
+      });
+    }, function (error) {
+      setStatus('DISCONNECTED');
+      console.error('STOMP connect error', error);
     });
-}
+  }
 
-function disconnect() {
-    if (stompClient) stompClient.disconnect();
-    stompClient = null;
-    setStatus('DISCONNECTED');
-}
+  function disconnect() {
+    if (subscription) {
+      subscription.unsubscribe();
+      subscription = null;
+    }
+    if (stompClient) {
+      stompClient.disconnect(() => setStatus('DISCONNECTED'));
+      stompClient = null;
+    } else {
+      setStatus('DISCONNECTED');
+    }
+  }
 
-function sendMessage() {
-    if (!stompClient) return alert('Not connected');
-
-    const content = document.getElementById('content').value.trim();
-    const username = usernameInput.value.trim() || 'anonymous';
+  function sendMessage() {
+    const content = contentInput.value && contentInput.value.trim();
+    const username = usernameInput.value && usernameInput.value.trim();
     if (!content) return;
+    // build payload: adjust keys to match backend DTO
+    const payload = {
+      content,
+      username: username || 'Anonymous'
+    };
 
-    const payload = { type: 'MESSAGE', senderName: username, content };
-    stompClient.send(APP_DESTINATION, {}, JSON.stringify(payload));
+    // If your backend expects to POST to a REST endpoint instead of STOMP send, uncomment fetch() block below.
+    if (stompClient && stompClient.connected) {
+      // server should have an @MessageMapping for the destination below
+      stompClient.send('/app/chat.sendMessage', {}, JSON.stringify(payload));
+      contentInput.value = '';
+    } else {
+      // fallback: POST to REST endpoint /messages
+      fetch('/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(r => {
+        if (!r.ok) console.warn('POST /messages failed', r.status);
+        contentInput.value = '';
+      }).catch(err => console.error('POST /messages err', err));
+    }
+  }
 
-    document.getElementById('content').value = '';
-}
+  async function fetchHistory() {
+    try {
+      // Assumes backend exposes GET /messages?limit=50 returning JSON array ordered desc
+      const res = await fetch('/messages?limit=50');
+      if (!res.ok) {
+        console.warn('Could not fetch history', res.status);
+        return;
+      }
+      const arr = await res.json();
+      clearUI();
+      // arr expected newest-first; render in order
+      for (const m of arr) renderMessage(m);
+    } catch (e) {
+      console.error('fetchHistory error', e);
+    }
+  }
 
-// Event listeners
-connectBtn.addEventListener('click', connect);
-disconnectBtn.addEventListener('click', disconnect);
-sendBtn.addEventListener('click', sendMessage);
-document.getElementById('content').addEventListener('keypress', e => {
-    if (e.key === 'Enter') sendMessage();
-});
+  // events
+  connectBtn.addEventListener('click', connect);
+  disconnectBtn.addEventListener('click', disconnect);
+  sendBtn.addEventListener('click', sendMessage);
+  fetchHistoryBtn.addEventListener('click', fetchHistory);
+  clearMessagesBtn.addEventListener('click', clearUI);
+
+  // send on Enter in input
+  contentInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  // auto-connect on page load (optional)
+  window.addEventListener('load', () => {
+    setStatus('DISCONNECTED');
+    // try auto-connect:
+    // connect();
+    fetchHistory(); // show history immediately
+  });
+
+})();
+// index.js — SockJS + STOMP client for your HTML
+(() => {
+  const wsEndpointEl = document.getElementById('wsEndpoint'); // "/chat"
+  const topicPatternEl = document.getElementById('topicPattern'); // "/topic/global"
+  const statusEl = document.getElementById('status');
+  const messagesEl = document.getElementById('messages');
+  const msgCountEl = document.getElementById('msgCount');
+
+  const connectBtn = document.getElementById('connectBtn');
+  const disconnectBtn = document.getElementById('disconnectBtn');
+  const sendBtn = document.getElementById('sendBtn');
+  const fetchHistoryBtn = document.getElementById('fetchHistory');
+  const clearMessagesBtn = document.getElementById('clearMessages');
+
+  const usernameInput = document.getElementById('username');
+  const contentInput = document.getElementById('content');
+
+  let stompClient = null;
+  let subscription = null;
+  let messageCount = 0;
+
+  function setStatus(s) {
+    statusEl.textContent = s;
+    statusEl.style.color = s === 'CONNECTED' ? '#6ee7b7' : '#ffb86b';
+  }
+
+  function renderMessage(msg) {
+    // msg expected: {id, content, createdAt, senderId/displayName/username}
+    const wrapper = document.createElement('div');
+    wrapper.className = 'msg';
+    // mark own messages if username matches
+    const currentUser = usernameInput.value && usernameInput.value.trim();
+    if (msg.username && currentUser && msg.username === currentUser) {
+      wrapper.classList.add('own');
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'metaRow';
+    const userSpan = document.createElement('div');
+    userSpan.className = 'username';
+    userSpan.textContent = msg.displayName || msg.username || 'Anonymous';
+    const timeSpan = document.createElement('div');
+    timeSpan.className = 'time';
+    timeSpan.textContent = new Date(msg.createdAt || Date.now()).toLocaleString();
+
+    meta.appendChild(userSpan);
+    meta.appendChild(timeSpan);
+
+    const content = document.createElement('div');
+    content.textContent = msg.content || '';
+
+    wrapper.appendChild(meta);
+    wrapper.appendChild(content);
+
+    messagesEl.prepend(wrapper); // newest on top (your SQL uses ORDER BY created_at DESC)
+    messageCount++;
+    msgCountEl.textContent = messageCount;
+  }
+
+  function clearUI() {
+    messagesEl.innerHTML = '';
+    messageCount = 0;
+    msgCountEl.textContent = 0;
+  }
+
+  function connect() {
+    if (stompClient && stompClient.connected) {
+      return;
+    }
+
+    const endpoint = wsEndpointEl.textContent || '/chat';
+    // build absolute URL — SockJS will use same host/port as page by default
+    // If your websocket URL is different, set wsEndpointEl.innerText to the correct path.
+    const sock = new SockJS(endpoint);
+    stompClient = Stomp.over(sock);
+
+    // Optional: disable debug noise in console
+    stompClient.debug = function () {};
+
+    stompClient.connect({}, function (frame) {
+      setStatus('CONNECTED');
+      // subscribe to topic
+      const topic = topicPatternEl.textContent || '/topic/global';
+      subscription = stompClient.subscribe(topic, function (message) {
+        try {
+          const body = JSON.parse(message.body);
+          renderMessage(body);
+        } catch (e) {
+          // if backend sends plain text:
+          renderMessage({ content: message.body, createdAt: Date.now() });
+        }
+      });
+    }, function (error) {
+      setStatus('DISCONNECTED');
+      console.error('STOMP connect error', error);
+    });
+  }
+
+  function disconnect() {
+    if (subscription) {
+      subscription.unsubscribe();
+      subscription = null;
+    }
+    if (stompClient) {
+      stompClient.disconnect(() => setStatus('DISCONNECTED'));
+      stompClient = null;
+    } else {
+      setStatus('DISCONNECTED');
+    }
+  }
+
+  function sendMessage() {
+    const content = contentInput.value && contentInput.value.trim();
+    const username = usernameInput.value && usernameInput.value.trim();
+    if (!content) return;
+    // build payload: adjust keys to match backend DTO
+    const payload = {
+      content,
+      username: username || 'Anonymous'
+    };
+
+    // If your backend expects to POST to a REST endpoint instead of STOMP send, uncomment fetch() block below.
+    if (stompClient && stompClient.connected) {
+      // server should have an @MessageMapping for the destination below
+      stompClient.send('/app/chat.sendMessage', {}, JSON.stringify(payload));
+      contentInput.value = '';
+    } else {
+      // fallback: POST to REST endpoint /messages
+      fetch('/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(r => {
+        if (!r.ok) console.warn('POST /messages failed', r.status);
+        contentInput.value = '';
+      }).catch(err => console.error('POST /messages err', err));
+    }
+  }
+
+  async function fetchHistory() {
+    try {
+      // Assumes backend exposes GET /messages?limit=50 returning JSON array ordered desc
+      const res = await fetch('/messages?limit=50');
+      if (!res.ok) {
+        console.warn('Could not fetch history', res.status);
+        return;
+      }
+      const arr = await res.json();
+      clearUI();
+      // arr expected newest-first; render in order
+      for (const m of arr) renderMessage(m);
+    } catch (e) {
+      console.error('fetchHistory error', e);
+    }
+  }
+
+  // events
+  connectBtn.addEventListener('click', connect);
+  disconnectBtn.addEventListener('click', disconnect);
+  sendBtn.addEventListener('click', sendMessage);
+  fetchHistoryBtn.addEventListener('click', fetchHistory);
+  clearMessagesBtn.addEventListener('click', clearUI);
+
+  // send on Enter in input
+  contentInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  // auto-connect on page load (optional)
+  window.addEventListener('load', () => {
+    setStatus('DISCONNECTED');
+    // try auto-connect:
+    // connect();
+    fetchHistory(); // show history immediately
+  });
+
+})();

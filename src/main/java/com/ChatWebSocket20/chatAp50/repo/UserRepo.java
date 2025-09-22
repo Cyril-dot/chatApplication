@@ -2,10 +2,12 @@ package com.ChatWebSocket20.chatAp50.repo;
 
 import com.ChatWebSocket20.chatAp50.entity.UserEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
-import java.util.Optional;
-import java.util.UUID;
+import org.springframework.stereotype.Repository;
 
-public interface UserRepo extends JpaRepository<UserEntity, UUID> {
+import java.util.Optional;
+
+@Repository
+public interface UserRepo extends JpaRepository<UserEntity, Long> {
 
     /**
      * Find a user by username
